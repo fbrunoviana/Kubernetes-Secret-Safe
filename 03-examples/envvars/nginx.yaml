@@ -1,0 +1,102 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: my-ext-secret
+  name: nginx-secret-deployment
+  labels:
+    app: nginx-secret
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-secret
+  template:
+    metadata:
+      labels:
+        app: nginx-secret
+    spec:
+      initContainers:
+      - name: init-html
+        image: busybox
+        command: ['sh', '-c', 'echo "<!DOCTYPE html><html><head><title>Senha Secreta</title></head><body><h1>A senha secreta é: $MY_SECRET_PASSWORD</h1></body></html>" > /usr/share/nginx/html/index.html']
+        env:
+        - name: MY_SECRET_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: secret-to-be-created
+              key: somepassword
+        volumeMounts:
+        - name: html
+          mountPath: /usr/share/nginx/html
+      containers:
+      - name: nginx
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: html
+          mountPath: /usr/share/nginx/html
+      volumes:
+      - name: html
+        emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: my-ext-secret
+  name: nginx-config
+data:
+  index.html: |
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Senha Secreta</title>
+    </head>
+    <body>
+        <h1>A senha secreta é: __MY_SECRET_PASSWORD__</h1>
+    </body>
+    </html>
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: my-ext-secret
+  name: startup-script
+data:
+  10-replace-env-vars.sh: |
+    #!/bin/sh
+    sed -i "s/__MY_SECRET_PASSWORD__/$MY_SECRET_PASSWORD/g" /usr/share/nginx/html/index.html
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: my-ext-secret
+  name: nginx-secret-service
+spec:
+  selector:
+    app: nginx-secret
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  namespace: my-ext-secret
+  name: nginx-secret-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  rules:
+  - host: secretapp.apps.IPADDR.nip.io 
+    http:
+      paths:
+      - path: /secretapp(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: nginx-secret-service
+            port: 
+              number: 80
